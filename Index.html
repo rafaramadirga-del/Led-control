@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kontrol LED ESP32-S3 Suara & Bluetooth</title>
+    <style>
+        body { font-family: Arial, sans-serif; text-align: center; margin-top: 30px; background-color: #f0f2f5; }
+        .card { background: white; padding: 20px; border-radius: 12px; display: inline-block; box-shadow: 0px 4px 10px rgba(0,0,0,0.1); width: 90%; max-width: 400px; }
+        button { font-size: 18px; padding: 12px 20px; margin: 10px; border: none; border-radius: 8px; cursor: pointer; width: 100%; color: white; }
+        #btnConnect { background-color: #007bff; }
+        #btnOn { background-color: #28a745; }
+        #btnOff { background-color: #dc3545; }
+        #btnVoice { background-color: #6f42c1; }
+        #status { font-weight: bold; margin: 15px 0; color: #555; }
+        #logSuara { font-style: italic; color: #666; font-size: 14px; margin-top: 5px; }
+    </style>
+</head>
+<body>
+
+<div class="card">
+    <h2>ESP32-S3 Control Center</h2>
+    <p id="status">Status: Belum Terhubung</p>
+    
+    <button id="btnConnect" onclick="connectBLE()">Hubungkan Bluetooth</button>
+    <hr>
+    <button id="btnOn" onclick="sendData('ON')" disabled>Nyalakan LED</button>
+    <button id="btnOff" onclick="sendData('OFF')" disabled>Matikan LED</button>
+    
+    <hr>
+    <h3>Perintah Suara</h3>
+    <button id="btnVoice" onclick="startVoiceRecognition()" disabled>🎤 Ucapkan Perintah</button>
+    <p id="logSuara">Tekan tombol lalu ucapkan: "Nyalakan lampu" atau "Matikan lampu"</p>
+</div>
+
+<script>
+    let bluetoothDevice;
+    let rxCharacteristic;
+
+    // UUID yang sama dengan di ESP32-S3
+    const SERVICE_UUID = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
+    const CHARACTERISTIC_UUID_RX = "6e400002-b5a3-f393-e0a9-e50e24dcca9e";
+
+    async function connectBLE() {
+        try {
+            document.getElementById('status').innerText = "Mencari perangkat...";
+            bluetoothDevice = await navigator.bluetooth.requestDevice({
+                filters: [{ name: 'ESP32S3_Voice' }],
+                optionalServices: [SERVICE_UUID]
+            });
+
+            bluetoothDevice.addEventListener('gattserverdisconnected', onDisconnected);
+
+            const server = await bluetoothDevice.gatt.connect();
+            const service = await server.getPrimaryService(SERVICE_UUID);
+            rxCharacteristic = await service.getCharacteristic(CHARACTERISTIC_UUID_RX);
+
+            document.getElementById('status').innerText = "Status: Terhubung ✅";
+            document.getElementById('status').style.color = "green";
+            document.getElementById('btnConnect').innerText = "Putuskan Bluetooth";
+            document.getElementById('btnConnect').setAttribute("onclick", "disconnectBLE()");
+            
+            // Aktifkan tombol kontrol & suara
+            document.getElementById('btnOn').disabled = false;
+            document.getElementById('btnOff').disabled = false;
+            document.getElementById('btnVoice').disabled = false;
+
+        } catch (error) {
+            console.log("Error: ", error);
+            document.getElementById('status').innerText = "Gagal Terhubung!";
+        }
+    }
+
+    function disconnectBLE() {
+        if (bluetoothDevice && bluetoothDevice.gatt.connected) {
+            bluetoothDevice.gatt.disconnect();
+        }
+    }
+
+    function onDisconnected() {
+        document.getElementById('status').innerText = "Status: Terputus ❌";
+        document.getElementById('status').style.color = "red";
+        document.getElementById('btnConnect').innerText = "Hubungkan Bluetooth";
+        document.getElementById('btnConnect').setAttribute("onclick", "connectBLE()");
+        
+        document.getElementById('btnOn').disabled = true;
+        document.getElementById('btnOff').disabled = true;
+        document.getElementById('btnVoice').disabled = true;
+    }
+
+    async function sendData(command) {
+        if (!rxCharacteristic) return;
+        try {
+            const encoder = new TextEncoder();
+            await rxCharacteristic.writeValue(encoder.encode(command));
+            console.log("Perintah terkirim: " + command);
+        } catch (error) {
+            console.log("Gagal mengirim data: ", error);
+        }
+    }
+
+    // --- FITUR PERINTAH SUARA (Web Speech API) ---
+    function startVoiceRecognition() {
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (!SpeechRecognition) {
+            alert("Browser Anda tidak mendukung fitur perintah suara.");
+            return;
+        }
+
+        const recognition = new SpeechRecognition();
+        recognition.lang = 'id-ID'; // Menggunakan bahasa Indonesia
+        recognition.interimResults = false;
+        recognition.maxAlternatives = 1;
+
+        document.getElementById('logSuara').innerText = "Mendengarkan suara Anda...";
+        recognition.start();
+
+        recognition.onresult = function(event) {
+            const speechResult = event.results[0][0].transcript.toLowerCase();
+            document.getElementById('logSuara').innerText = `Anda mengucapkan: "${speechResult}"`;
+
+            // Logika kata kunci suara
+            if (speechResult.includes("nyala") || speechResult.includes("hidup")) {
+                sendData('ON');
+            } else if (speechResult.includes("mati")) {
+                sendData('OFF');
+            } else {
+                alert("Perintah suara tidak dikenali. Ucapkan 'Nyalakan lampu' atau 'Matikan lampu'");
+            }
+        };
+
+        recognition.onerror = function(event) {
+            document.getElementById('logSuara').innerText = "Gagal mendeteksi suara. Coba lagi.";
+        };
+    }
+</script>
+
+</body>
+</html>
